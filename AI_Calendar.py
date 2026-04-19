@@ -30,7 +30,7 @@ def send_telegram(text, reply_markup=None):
         log("no CHAT_ID, skip telegram")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    payload = {"chat_id": CHAT_ID, "text": text}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
     r = requests.post(url, json=payload, timeout=15)
@@ -73,7 +73,7 @@ def do_create():
     try:
         data = parse_with_gemini(TEXT)
     except Exception as e:
-        send_telegram(f"❌ 我沒看懂這句話：`{TEXT}`\n錯誤：{e}")
+        send_telegram(f"❌ 我沒看懂這句話：{TEXT}\n錯誤：{e}")
         return
 
     start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
@@ -87,9 +87,9 @@ def do_create():
     created = get_calendar().events().insert(calendarId='primary', body=event).execute()
     msg = (
         f"✅ 已加入行事曆\n"
-        f"📅 *{data['summary']}*\n"
+        f"📅 {data['summary']}\n"
         f"⏰ {start.strftime('%m/%d (%a) %H:%M')} – {end.strftime('%H:%M')}\n"
-        f"🔗 [查看]({created.get('htmlLink')})"
+        f"🔗 {created.get('htmlLink')}"
     )
     send_telegram(msg)
 
@@ -122,7 +122,7 @@ def do_list():
         send_telegram(f"📭 {label}沒有行程")
         return
 
-    lines = [f"📋 *{label}行程 ({len(events)} 筆)*\n"]
+    lines = [f"📋 {label}行程 ({len(events)} 筆)\n"]
     keyboard = []
     for ev in events:
         s = ev['start'].get('dateTime') or ev['start'].get('date')
@@ -162,7 +162,7 @@ def main():
             do_create()
     except Exception as e:
         log(f"unhandled error: {e}")
-        send_telegram(f"❌ 發生錯誤：`{e}`")
+        send_telegram(f"❌ 發生錯誤：{e}")
 
 
 if __name__ == '__main__':
