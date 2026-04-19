@@ -34,6 +34,7 @@ jobs:
           GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
           CHAT_ID:           ${{ github.event.inputs.chat_id }}
           ACTION:            ${{ github.event.inputs.action }}
+          FAMILY_CAL_ID:     ${{ secrets.FAMILY_CAL_ID }} # <--- 必須有這一行！
           TEXT:              ${{ github.event.inputs.text }}
           EVENT_ID:          ${{ github.event.inputs.event_id }}
         run: python AI_Calendar.py
