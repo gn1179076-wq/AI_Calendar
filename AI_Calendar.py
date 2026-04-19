@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import datetime
 import requests
 from zoneinfo import ZoneInfo
@@ -18,6 +19,17 @@ EVENT_ID          = os.environ.get("EVENT_ID", "")
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+# 固定格式：[YYYY/]M/D HH:MM[-HH:MM] 標題
+RE_STRICT = re.compile(
+    r'^\s*'
+    r'(?:(?P<year>\d{4})/)?'
+    r'(?P<month>\d{1,2})/(?P<day>\d{1,2})'
+    r'\s+'
+    r'(?P<sh>\d{1,2}):(?P<sm>\d{2})'
+    r'(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?'
+    r'\s+(?P<title>.+?)\s*$'
+)
 
 
 def log(msg):
@@ -43,6 +55,39 @@ def get_calendar():
     return build('calendar', 'v3', credentials=creds)
 
 
+def try_parse_strict(text):
+    """嘗試用固定格式解析，成功回傳 dict，失敗回傳 None"""
+    m = RE_STRICT.match(text)
+    if not m:
+        return None
+    g = m.groupdict()
+    now = datetime.datetime.now(TZ)
+    year = int(g["year"]) if g["year"] else now.year
+
+    try:
+        start = datetime.datetime(year, int(g["month"]), int(g["day"]),
+                                  int(g["sh"]), int(g["sm"]))
+    except ValueError:
+        return None
+
+    # 沒給年份且日期已過 → 推到明年
+    if not g["year"] and start < now.replace(tzinfo=None):
+        start = start.replace(year=year + 1)
+
+    if g["eh"]:
+        end = start.replace(hour=int(g["eh"]), minute=int(g["em"]))
+        if end <= start:
+            end = end + datetime.timedelta(days=1)
+    else:
+        end = start + datetime.timedelta(hours=1)
+
+    return {
+        "summary": g["title"],
+        "start": start.strftime("%Y-%m-%dT%H:%M"),
+        "end":   end.strftime("%Y-%m-%dT%H:%M"),
+    }
+
+
 def parse_with_gemini(text):
     """用 Gemini 把自然語言解析成事件資料"""
     genai.configure(api_key=GEMINI_API_KEY)
@@ -54,7 +99,7 @@ def parse_with_gemini(text):
 規則：
 - 只輸出 JSON，不要任何其他文字或 markdown code fence
 - 如果沒指定結束時間，預設事件長 1 小時
-- 如果沒指定年份，用最接近的未來日期（例如 12 月講「1/5」代表明年 1 月 5 日）
+- 如果沒指定年份，用最接近的未來日期
 - 時區一律 Asia/Taipei
 - 時間不帶時區資訊
 
@@ -62,7 +107,6 @@ def parse_with_gemini(text):
 
     resp = model.generate_content(prompt)
     raw = resp.text.strip()
-    # 去掉可能的 code fence
     if raw.startswith("```"):
         raw = raw.strip("`").lstrip("json").strip()
     log(f"gemini raw: {raw}")
@@ -70,11 +114,20 @@ def parse_with_gemini(text):
 
 
 def do_create():
-    try:
-        data = parse_with_gemini(TEXT)
-    except Exception as e:
-        send_telegram(f"❌ 我沒看懂這句話：{TEXT}\n錯誤：{e}")
-        return
+    # 1. 先試固定格式
+    data = try_parse_strict(TEXT)
+    source = "strict"
+
+    # 2. 固定格式不吻合才呼叫 Gemini
+    if data is None:
+        try:
+            data = parse_with_gemini(TEXT)
+            source = "gemini"
+        except Exception as e:
+            send_telegram(f"❌ 我沒看懂這句話：{TEXT}\n錯誤：{e}")
+            return
+
+    log(f"parsed via {source}: {data}")
 
     start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
     end   = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
