@@ -32,6 +32,7 @@ jobs:
           TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
           GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
+          CHAT_ID:           ${{ github.event.inputs.chat_id }} # <--- 必須有這行
           ACTION:            ${{ github.event.inputs.action }}
           FAMILY_CAL_ID:     ${{ secrets.FAMILY_CAL_ID }} # <--- 必須有這一行！
           TEXT:              ${{ github.event.inputs.text }}
