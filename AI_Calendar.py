@@ -20,13 +20,12 @@ FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-# 格式 1：[YYYY/]M/D HH:MM[-HH:MM] 標題
+# 格式 1：M/D HH:MM
 RE_STRICT = re.compile(
     r'^\s*(?:(?P<year>\d{4})/)?(?P<month>\d{1,2})/(?P<day>\d{1,2})\s+'
     r'(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$'
 )
-
-# 格式 2：今天/明天/後天 HH:MM[-HH:MM] 標題
+# 格式 2：今天/明天/後天 HH:MM
 RE_RELATIVE = re.compile(
     r'^\s*(?P<rel>今天|明天|後天)\s+'
     r'(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$'
@@ -36,14 +35,11 @@ def log(msg):
     print(f"[AI_Calendar] {msg}", flush=True)
 
 def send_telegram(text, reply_markup=None):
-    if not CHAT_ID:
-        log("❌ 錯誤: 無 CHAT_ID，無法發送訊息")
-        return
+    if not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
-    r = requests.post(url, json=payload, timeout=15)
-    log(f"Telegram 發送狀態: {r.status_code}")
+    requests.post(url, json=payload, timeout=15)
 
 def get_calendar():
     token_info = json.loads(GOOGLE_TOKEN_JSON)
@@ -51,9 +47,7 @@ def get_calendar():
     return build('calendar', 'v3', credentials=creds)
 
 def try_parse_strict(text):
-    """快速解析：支援今天/明天/後天與 M/D 格式"""
     now = datetime.datetime.now(TZ)
-    # 嘗試相對日期
     rel_m = RE_RELATIVE.match(text)
     if rel_m:
         g = rel_m.groupdict()
@@ -62,7 +56,6 @@ def try_parse_strict(text):
         start = base.replace(hour=int(g["sh"]), minute=int(g["sm"]), second=0, microsecond=0)
         end = start.replace(hour=int(g["eh"]), minute=int(g["em"])) if g["eh"] else start + datetime.timedelta(hours=1)
         return {"summary": g["title"], "start": start.strftime("%Y-%m-%dT%H:%M"), "end": end.strftime("%Y-%m-%dT%H:%M")}
-    # 嘗試絕對日期
     m = RE_STRICT.match(text)
     if m:
         g = m.groupdict()
@@ -85,11 +78,11 @@ def parse_with_gemini(text):
 
 def do_create():
     data = try_parse_strict(TEXT)
-    mode = "快速解析 (⚡️)"
+    mode = "⚡️"
     if data is None:
         try:
             data = parse_with_gemini(TEXT)
-            mode = "AI 解析 (🤖)"
+            mode = "🤖"
         except Exception as e:
             send_telegram(f"❌ 解析失敗: {e}"); return
 
@@ -108,11 +101,9 @@ def do_create():
         'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
     }
     created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
-    send_telegram(f"✅ 已存入 {cal_label} 日曆 ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 [查看行程]({created.get('htmlLink')})")
+    send_telegram(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 [查看行程]({created.get('htmlLink')})")
 
 def do_list():
-    send_telegram(f"🔍 [Debug] 開始讀取行程...\nCHAT_ID: {CHAT_ID[:5]}...\nFAMILY_ID: {'已設定' if FAMILY_CAL_ID else '未設定'}")
-    
     now = datetime.datetime.now(TZ)
     arg = TEXT.strip().lower()
     if arg == "today":
@@ -124,45 +115,52 @@ def do_list():
 
     try:
         service = get_calendar()
-        cals = [('primary', '👤')]
-        if FAMILY_CAL_ID and "@" in FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠'))
+        cals = [('primary', '👤', 'p')]
+        if FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠', 'f'))
         
         lines = [f"📋 {label}行程預覽\n"]
         keyboard = []
 
-        for cid, icon in cals:
-            send_telegram(f"📡 [Debug] 正在讀取 {icon}...")
+        for cid, icon, short_code in cals:
             events = service.events().list(calendarId=cid, timeMin=sd.isoformat(), timeMax=ed.isoformat(),
                                           singleEvents=True, orderBy='startTime').execute().get('items', [])
-            send_telegram(f"✅ [Debug] {icon} 讀取完畢 (發現 {len(events)} 筆)")
             
             for ev in events:
                 t = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
-                lines.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {ev.get('summary', '(無)')}")
-                keyboard.append([{"text": f"🗑 {icon} {ev.get('summary','')[0:10]}", "callback_data": f"del:{cid}|{ev['id']}"}])
+                summary = ev.get('summary', '(無標題)')
+                lines.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {summary}")
+                keyboard.append([{"text": f"🗑 {icon} {summary[:10]}", "callback_data": f"del:{short_code}|{ev['id']}"}])
 
-        if len(lines) <= 1: send_telegram(f"📭 {label}沒有行程")
-        else: send_telegram("\n".join(lines), reply_markup={"inline_keyboard": keyboard})
+        if len(lines) <= 1:
+            send_telegram(f"📭 {label}沒有行程")
+        else:
+            send_telegram("\n".join(lines), reply_markup={"inline_keyboard": keyboard})
+            
     except Exception as e:
-        send_telegram(f"❌ [Debug Error] 失敗: {str(e)}")
+        send_telegram(f"❌ 無法讀取行程: {str(e)}")
 
 def do_del():
     try:
-        cid, eid = EVENT_ID.split("|", 1) if "|" in EVENT_ID else ('primary', EVENT_ID)
+        raw_data = EVENT_ID
+        if "|" in raw_data:
+            short_code, eid = raw_data.split("|", 1)
+            cid = 'primary' if short_code == 'p' else FAMILY_CAL_ID
+        else:
+            cid, eid = 'primary', raw_data
+            
         get_calendar().events().delete(calendarId=cid, eventId=eid).execute()
-        send_telegram("🗑 行程已刪除")
-    except Exception as e: send_telegram(f"❌ 刪除失敗: {e}")
+        send_telegram("🗑 行程已成功刪除")
+    except Exception as e:
+        send_telegram(f"❌ 刪除失敗: {e}")
 
 def main():
-    if not CHAT_ID: 
-        log("錯誤: 環境變數 CHAT_ID 為空")
-        return
+    if not CHAT_ID: return
     try:
         if ACTION == "list": do_list()
         elif ACTION == "del": do_del()
         else: do_create()
-    except Exception as e: send_telegram(f"❌ 執行失敗: {e}")
+    except Exception as e: log(f"Error: {e}")
 
 if __name__ == '__main__':
     main()
