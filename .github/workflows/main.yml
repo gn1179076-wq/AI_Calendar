@@ -8,7 +8,7 @@ on:
         required: false
         default: 'create'
       text:
-        description: 'Message Text (for create / list range)'
+        description: 'Message Text'
         required: false
         default: ''
       chat_id:
@@ -18,6 +18,9 @@ on:
         description: 'Event ID (for del)'
         required: false
         default: ''
+  # ── 加入定時執行 ──
+  schedule:
+    - cron: '0 14 * * *' # 每天 UTC 14:00 (台灣 22:00)
 
 jobs:
   run:
@@ -26,15 +29,23 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12' # 建議更新到 3.12 避開警告
       - run: pip install -r requirements.txt
-      - env:
+      - name: Run Python Script
+        env:
           TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
           GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
-          CHAT_ID:           ${{ github.event.inputs.chat_id }} # <--- 必須有這行
-          ACTION:            ${{ github.event.inputs.action }}
-          FAMILY_CAL_ID:     ${{ secrets.FAMILY_CAL_ID }} # <--- 必須有這一行！
-          TEXT:              ${{ github.event.inputs.text }}
-          EVENT_ID:          ${{ github.event.inputs.event_id }}
+          FAMILY_CAL_ID:     ${{ secrets.FAMILY_CAL_ID }}
+          
+          # ── 修改這三個變數的抓取方式 ──
+          # 如果是定時執行，github.event.inputs 會是空的，所以要給預設值
+          ACTION:  ${{ github.event.inputs.action || 'list' }}
+          TEXT:    ${{ github.event.inputs.text || '1' }} # 晚上十點自動跑時，預設列出未來 1 天的行程
+          
+          # 定時執行時沒有 inputs.chat_id，所以必須從 Secrets 抓取預設的 CHAT_ID
+          # 請務必在 GitHub Secrets 加入一個名稱為 CHAT_ID 的變數
+          CHAT_ID: ${{ github.event.inputs.chat_id || secrets.CHAT_ID }}
+          
+          EVENT_ID: ${{ github.event.inputs.event_id }}
         run: python AI_Calendar.py
