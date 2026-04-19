@@ -4,9 +4,6 @@ name: Update Calendar from Telegram
 on:
   workflow_dispatch:
     inputs:
-      chat_id:
-        description: 'Telegram Chat ID'
-        required: true
       text:
         description: 'Message Text'
         required: true
@@ -30,6 +27,6 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-          CHAT_ID: ${{ github.event.inputs.chat_id }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
           TEXT: ${{ github.event.inputs.text }}
-        run: python bot.py
+        run: python AI_Calendar.py
