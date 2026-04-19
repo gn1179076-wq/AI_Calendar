@@ -6,7 +6,9 @@ import requests
 from zoneinfo import ZoneInfo
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-import google.generativeai as genai
+def parse_with_gemini(text):
+    import google.generativeai as genai # 只有真的要用到 AI 時才載入
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # ── 環境變數 ──
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
