@@ -1,32 +1,39 @@
 name: Update Calendar from Telegram
 
-# 設定為可以被外部 API 觸發 (workflow_dispatch)
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: 'Action: create / list / del'
+        required: false
+        default: 'create'
       text:
-        description: 'Message Text'
+        description: 'Message Text (for create / list range)'
+        required: false
+        default: ''
+      chat_id:
+        description: 'Telegram Chat ID'
         required: true
+      event_id:
+        description: 'Event ID (for del)'
+        required: false
+        default: ''
 
 jobs:
-  update-calendar:
+  run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run Python script
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      - run: pip install -r requirements.txt
+      - env:
+          TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          TEXT: ${{ github.event.inputs.text }}
+          GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
+          CHAT_ID:           ${{ github.event.inputs.chat_id }}
+          ACTION:            ${{ github.event.inputs.action }}
+          TEXT:              ${{ github.event.inputs.text }}
+          EVENT_ID:          ${{ github.event.inputs.event_id }}
         run: python AI_Calendar.py
