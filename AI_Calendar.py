@@ -2,67 +2,168 @@ import os
 import json
 import datetime
 import requests
+from zoneinfo import ZoneInfo
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+import google.generativeai as genai
 
-# 從環境變數讀取資料
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# ── 環境變數 ──
+TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
-CHAT_ID = os.environ.get("CHAT_ID")  # 由 GitHub Actions 傳入
-TEXT = os.environ.get("TEXT")        # 由 GitHub Actions 傳入
+GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
+CHAT_ID           = os.environ.get("CHAT_ID")      # 由 Worker 傳入
+ACTION            = os.environ.get("ACTION", "create")  # create / list / del
+TEXT              = os.environ.get("TEXT", "")
+EVENT_ID          = os.environ.get("EVENT_ID", "")
 
+TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-def send_telegram_message(text):
-    """將結果傳回 Telegram"""
+
+def log(msg):
+    """輸出到 GitHub Actions log，方便排錯"""
+    print(f"[AI_Calendar] {msg}", flush=True)
+
+
+def send_telegram(text, reply_markup=None):
+    if not CHAT_ID:
+        log("no CHAT_ID, skip telegram")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    r = requests.post(url, json=payload, timeout=15)
+    log(f"telegram status={r.status_code} body={r.text[:200]}")
 
-def get_calendar_service():
-    """取得 Google Calendar 授權"""
-    if GOOGLE_TOKEN_JSON:
-        token_info = json.loads(GOOGLE_TOKEN_JSON)
-        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
-        return build('calendar', 'v3', credentials=creds)
-    return None
 
-def main():
-    if not TEXT or not CHAT_ID:
-        print("沒有收到文字或 CHAT_ID，結束程式。")
+def get_calendar():
+    token_info = json.loads(GOOGLE_TOKEN_JSON)
+    creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+    return build('calendar', 'v3', credentials=creds)
+
+
+def parse_with_gemini(text):
+    """用 Gemini 把自然語言解析成事件資料"""
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    now = datetime.datetime.now(TZ)
+    prompt = f"""你是行事曆助手。現在時間是 {now.strftime('%Y-%m-%d %H:%M %A')} (Asia/Taipei)。
+把使用者的訊息解析成 JSON，格式：
+{{"summary": "事件標題", "start": "YYYY-MM-DDTHH:MM", "end": "YYYY-MM-DDTHH:MM"}}
+規則：
+- 只輸出 JSON，不要任何其他文字或 markdown code fence
+- 如果沒指定結束時間，預設事件長 1 小時
+- 如果沒指定年份，用最接近的未來日期（例如 12 月講「1/5」代表明年 1 月 5 日）
+- 時區一律 Asia/Taipei
+- 時間不帶時區資訊
+
+使用者訊息：{text}"""
+
+    resp = model.generate_content(prompt)
+    raw = resp.text.strip()
+    # 去掉可能的 code fence
+    if raw.startswith("```"):
+        raw = raw.strip("`").lstrip("json").strip()
+    log(f"gemini raw: {raw}")
+    return json.loads(raw)
+
+
+def do_create():
+    try:
+        data = parse_with_gemini(TEXT)
+    except Exception as e:
+        send_telegram(f"❌ 我沒看懂這句話：`{TEXT}`\n錯誤：{e}")
         return
 
+    start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
+    end   = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
+
+    event = {
+        'summary': data["summary"],
+        'start':   {'dateTime': start.isoformat(), 'timeZone': 'Asia/Taipei'},
+        'end':     {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
+    }
+    created = get_calendar().events().insert(calendarId='primary', body=event).execute()
+    msg = (
+        f"✅ 已加入行事曆\n"
+        f"📅 *{data['summary']}*\n"
+        f"⏰ {start.strftime('%m/%d (%a) %H:%M')} – {end.strftime('%H:%M')}\n"
+        f"🔗 [查看]({created.get('htmlLink')})"
+    )
+    send_telegram(msg)
+
+
+def do_list():
+    """列出未來 N 天的事件。TEXT 可以是 'today' / '7' / '30' / 空"""
+    now = datetime.datetime.now(TZ)
+    arg = TEXT.strip().lower()
+    if arg == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end   = start + datetime.timedelta(days=1)
+        label = "今天"
+    else:
+        try:
+            days = int(arg) if arg else 7
+        except ValueError:
+            days = 7
+        start = now
+        end   = now + datetime.timedelta(days=days)
+        label = f"未來 {days} 天"
+
+    events = get_calendar().events().list(
+        calendarId='primary',
+        timeMin=start.isoformat(),
+        timeMax=end.isoformat(),
+        singleEvents=True, orderBy='startTime', maxResults=50
+    ).execute().get('items', [])
+
+    if not events:
+        send_telegram(f"📭 {label}沒有行程")
+        return
+
+    lines = [f"📋 *{label}行程 ({len(events)} 筆)*\n"]
+    keyboard = []
+    for ev in events:
+        s = ev['start'].get('dateTime') or ev['start'].get('date')
+        dt = datetime.datetime.fromisoformat(s.replace('Z', '+00:00')).astimezone(TZ)
+        title = ev.get('summary', '(無標題)')
+        lines.append(f"• {dt.strftime('%m/%d %H:%M')}  {title}")
+        keyboard.append([{
+            "text": f"🗑 {dt.strftime('%m/%d %H:%M')} {title[:15]}",
+            "callback_data": f"del:{ev['id']}"
+        }])
+
+    send_telegram("\n".join(lines), reply_markup={"inline_keyboard": keyboard})
+
+
+def do_del():
+    if not EVENT_ID:
+        send_telegram("❌ 沒收到事件 ID")
+        return
     try:
-        # 切割字串
-        parts = TEXT.split(' ', 2)
-        if len(parts) < 3:
-            send_telegram_message("⚠️ 格式錯誤！請輸入例如：\n5/11 17:30 小孩看牙醫")
-            return
-
-        date_str, time_str, summary = parts
-        month, day = map(int, date_str.split('/'))
-        hour, minute = map(int, time_str.split(':'))
-        year = datetime.datetime.now().year
-        
-        start_time = datetime.datetime(year, month, day, hour, minute)
-        end_time = start_time + datetime.timedelta(hours=1)
-        
-        # 寫入日曆
-        service = get_calendar_service()
-        event = {
-            'summary': summary,
-            'start': {'dateTime': start_time.isoformat(), 'timeZone': 'Asia/Taipei'},
-            'end': {'dateTime': end_time.isoformat(), 'timeZone': 'Asia/Taipei'},
-        }
-        created_event = service.events().insert(calendarId='primary', body=event).execute()
-        event_link = created_event.get('htmlLink')
-        
-        # 回報成功
-        success_msg = f"✅ 已成功加入行事曆！\n📅 標題：{summary}\n⏰ 時間：{start_time.strftime('%Y-%m-%d %H:%M')}\n🔗 [點擊查看日曆]({event_link})"
-        send_telegram_message(success_msg)
-
+        get_calendar().events().delete(calendarId='primary', eventId=EVENT_ID).execute()
+        send_telegram("🗑 已刪除該事件")
     except Exception as e:
-        send_telegram_message(f"❌ 發生錯誤：{str(e)}")
+        send_telegram(f"❌ 刪除失敗：{e}")
+
+
+def main():
+    log(f"action={ACTION} chat_id={CHAT_ID} text={TEXT!r} event_id={EVENT_ID!r}")
+    if not CHAT_ID:
+        log("no CHAT_ID, abort")
+        return
+    try:
+        if ACTION == "list":
+            do_list()
+        elif ACTION == "del":
+            do_del()
+        else:
+            do_create()
+    except Exception as e:
+        log(f"unhandled error: {e}")
+        send_telegram(f"❌ 發生錯誤：`{e}`")
+
 
 if __name__ == '__main__':
     main()
