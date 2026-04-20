@@ -22,6 +22,7 @@ SOURCE            = "discord"
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+WD = ["一","二","三","四","五","六","日"]  # 星期對照表（Monday=0）
 
 # ── 支援格式說明 ──
 FORMAT_HELP = """❓ 格式不符，請用以下格式輸入：
@@ -144,7 +145,7 @@ def do_create():
         'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
     }
     created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
-    notify(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 查看行程：{created.get('htmlLink')}")
+    notify(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d')} ({WD[start.weekday()]}) {start.strftime('%H:%M')}\n🔗 查看行程：{created.get('htmlLink')}")
 
 def do_list():
     now = datetime.datetime.now(TZ)
@@ -167,8 +168,8 @@ def do_list():
                 t  = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
-                lines.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {summary}")
-        today_str = now.strftime("%m/%d (%a)").replace("Mon","一").replace("Tue","二").replace("Wed","三").replace("Thu","四").replace("Fri","五").replace("Sat","六").replace("Sun","日")
+                lines.append(f"{icon} {dt.strftime('%m/%d')}({WD[dt.weekday()]}) {dt.strftime('%H:%M')} {summary}")
+        today_str = f"{now.strftime('%m/%d')}({WD[now.weekday()]})"
         if not lines:
             notify(f"📆 今天是 {today_str}\n\n📭 {label}沒有行程")
         else:
