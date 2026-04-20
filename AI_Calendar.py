@@ -8,7 +8,6 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 # ── 環境變數 ──
-# TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")   # ← Telegram 已停用
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
 CHAT_ID           = os.environ.get("CHAT_ID")
@@ -51,14 +50,6 @@ RE_RELATIVE = re.compile(
 def log(msg):
     print(f"[AI_Calendar] {msg}", flush=True)
 
-# ── Telegram 相關（已停用） ──
-# def send_telegram(text, reply_markup=None):
-#     if not CHAT_ID: return
-#     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-#     payload = {"chat_id": CHAT_ID, "text": text}
-#     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
-#     requests.post(url, json=payload, timeout=15)
-
 def send_discord(text):
     if not DISCORD_WEBHOOK:
         log("send_discord skipped: DISCORD_WEBHOOK not set")
@@ -85,8 +76,6 @@ def notify(text):
         send_line(text)
     elif SOURCE == "discord":
         send_discord(text)
-    # else:                          # ← Telegram 已停用
-    #     send_telegram(text)
 
 def get_calendar():
     token_info = json.loads(GOOGLE_TOKEN_JSON)
@@ -174,9 +163,6 @@ def do_list():
             notify(f"📆 今天是 {today_str}\n\n📭 {label}沒有行程")
         else:
             notify(f"📆 今天是 {today_str}\n📋 {label}行程預覽\n\n" + "\n".join(lines))
-        # ── Telegram inline keyboard 已停用（Discord 不支援）──
-        # if SOURCE != "line":
-        #     send_telegram(f"📋 {label}行程預覽", reply_markup={"inline_keyboard": keyboard})
     except Exception as e:
         notify(f"❌ 無法讀取行程: {str(e)}")
 
