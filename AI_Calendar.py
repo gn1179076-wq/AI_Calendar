@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 
 # ── 環境變數 ──
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
+# TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
 CHAT_ID           = os.environ.get("CHAT_ID")
@@ -68,12 +68,12 @@ def send_discord(title, embed_fields=None, color=3066993):
     except Exception as e:
         log(f"Discord 連線異常: {e}")
 
-def send_telegram(text, reply_markup=None):
-    if not CHAT_ID: return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text}
-    if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
-    requests.post(url, json=payload, timeout=15)
+#def send_telegram(text, reply_markup=None):
+ #   if not CHAT_ID: return
+ #   url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+ #   payload = {"chat_id": CHAT_ID, "text": text}
+ #   if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
+ #   requests.post(url, json=payload, timeout=15)
 
 def send_line(text):
     if not CHAT_ID or not LINE_TOKEN: return
