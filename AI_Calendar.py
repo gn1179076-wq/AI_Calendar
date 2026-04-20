@@ -148,17 +148,22 @@ def do_list():
         sd = now; ed = now + datetime.timedelta(days=days); label = f"未來 {days} 天"
     try:
         service = get_calendar()
-        cals = [('primary', '👤', 'p')]
-        if FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠', 'f'))
-        lines = []
-        for cid, icon, short_code in cals:
+        cals = [('primary', '👤 個人', 'p')]
+        if FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠 家庭', 'f'))
+        sections = []
+        for cid, label, short_code in cals:
+            icon = label.split()[0]
             events = service.events().list(calendarId=cid, timeMin=sd.isoformat(), timeMax=ed.isoformat(),
                                            singleEvents=True, orderBy='startTime').execute().get('items', [])
+            cal_lines = []
             for ev in events:
                 t  = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
-                lines.append(f"{icon} {dt.strftime('%m/%d')}({WD[dt.weekday()]}) {dt.strftime('%H:%M')} {summary}")
+                cal_lines.append(f"{icon} {dt.strftime('%m/%d')}({WD[dt.weekday()]}) {dt.strftime('%H:%M')} {summary}")
+            if cal_lines:
+                sections.append(f"── {label} ──\n" + "\n".join(cal_lines))
+        lines = sections
         today_str = f"{now.strftime('%m/%d')}({WD[now.weekday()]})"
         if not lines:
             notify(f"📆 今天是 {today_str}\n\n📭 {label}沒有行程")
