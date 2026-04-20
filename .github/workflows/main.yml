@@ -1,4 +1,4 @@
-name: Update Calendar from Telegram/LINE
+name: Update Calendar from Discord/LINE
 
 on:
   workflow_dispatch:
@@ -12,16 +12,16 @@ on:
         required: false
         default: ''
       chat_id:
-        description: 'Telegram Chat ID or LINE User ID'
+        description: 'Discord / LINE User ID'
         required: true
       event_id:
         description: 'Event ID (for del)'
         required: false
         default: ''
       source:
-        description: 'Source: telegram / line'
+        description: 'Source: discord / line'
         required: false
-        default: 'telegram'
+        default: 'discord'
   # ── 加入定時執行 ──
   schedule:
     - cron: '55 21 * * *' # 台灣時間 05:55 (UTC 21:55)
@@ -37,7 +37,6 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run Python Script
         env:
-          TELEGRAM_TOKEN:           ${{ secrets.TELEGRAM_TOKEN }}
           GOOGLE_TOKEN_JSON:        ${{ secrets.GOOGLE_TOKEN_JSON }}
           GEMINI_API_KEY:           ${{ secrets.GEMINI_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
