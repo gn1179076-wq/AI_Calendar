@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 
 # ── 環境變數 ──
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
+# TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
 CHAT_ID           = os.environ.get("CHAT_ID")
