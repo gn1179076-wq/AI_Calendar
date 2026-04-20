@@ -44,7 +44,7 @@ jobs:
           FAMILY_CAL_ID:            ${{ secrets.FAMILY_CAL_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           ACTION:  ${{ github.event.inputs.action || 'list' }}
-          TEXT:    ${{ github.event.inputs.text || '1' }}
+          TEXT:    ${{ github.event.inputs.text || '7' }}
           CHAT_ID: ${{ github.event.inputs.chat_id || secrets.CHAT_ID }}
           EVENT_ID: ${{ github.event.inputs.event_id }}
           SOURCE:  ${{ github.event.inputs.source || 'discord' }}
