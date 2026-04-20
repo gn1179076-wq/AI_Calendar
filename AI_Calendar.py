@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 import json
 import re
@@ -9,92 +8,64 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 # ── 環境變數 ──
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-CF_WORKER_URL = os.environ.get("CF_WORKER_URL", "https://your-worker.workers.dev")
-
-ACTION = os.environ.get("ACTION", "create")
-TEXT = os.environ.get("TEXT", "")
-EVENT_ID = os.environ.get("EVENT_ID", "")
-FAMILY_CAL_ID = os.environ.get("FAMILY_CAL_ID")
-SOURCE = "discord"
+GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
+CHAT_ID           = os.environ.get("CHAT_ID")
+ACTION            = os.environ.get("ACTION", "create")
+TEXT              = os.environ.get("TEXT", "")
+EVENT_ID          = os.environ.get("EVENT_ID", "")
+FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
+LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+SOURCE            = os.environ.get("SOURCE", "telegram")
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-RE_STRICT = re.compile(r'^\s*(?:(?P<year>\d{4})/)?(?P<month>\d{1,2})/(?P<day>\d{1,2})\s+(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$')
-RE_RELATIVE = re.compile(r'^\s*(?P<rel>今天|明天|後天)\s+(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$')
+# 格式 1：M/D HH:MM
+RE_STRICT = re.compile(
+    r'^\s*(?:(?P<year>\d{4})/)?(?P<month>\d{1,2})/(?P<day>\d{1,2})\s+'
+    r'(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$'
+)
+# 格式 2：今天/明天/後天 HH:MM
+RE_RELATIVE = re.compile(
+    r'^\s*(?P<rel>今天|明天|後天)\s+'
+    r'(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$'
+)
 
 def log(msg):
     print(f"[AI_Calendar] {msg}", flush=True)
 
-# ==========================================
-# Discord 推播核心 (分批防爆版)
-# ==========================================
-def send_discord(title, embed_fields=None, color=3066993):
-    if not DISCORD_WEBHOOK_URL:
-        log("❌ 找不到 DISCORD_WEBHOOK_URL")
+def send_telegram(text, reply_markup=None):
+    if not CHAT_ID: return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": text}
+    if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
+    requests.post(url, json=payload, timeout=15)
+
+def send_line(text):
+    if not CHAT_ID or not LINE_TOKEN:
+        log(f"send_line skipped: CHAT_ID={bool(CHAT_ID)}, LINE_TOKEN={bool(LINE_TOKEN)}")
         return
-    
-    fields = embed_fields or []
-    for f in fields:
-        if not f.get("value") or str(f["value"]).strip() == "":
-            f["value"] = "-"
+    url = "https://api.line.me/v2/bot/message/push"
+    body = {"to": CHAT_ID, "messages": [{"type": "text", "text": text}]}
+    log(f"send_line to={CHAT_ID}")
+    r = requests.post(url, json=body, headers={
+        "Authorization": f"Bearer {LINE_TOKEN}",
+        "Content-Type": "application/json"
+    }, timeout=15)
+    log(f"send_line status={r.status_code} body={r.text[:200]}")
 
-    chunk_size = 20 
-    chunks = [fields[i:i + chunk_size] for i in range(0, len(fields), chunk_size)] if fields else [[]]
-    now_iso = datetime.datetime.now(TZ).isoformat()
+def notify(text):
+    if SOURCE == "line":
+        send_line(text)
+    else:
+        send_telegram(text)
 
-    for i, chunk in enumerate(chunks):
-        display_title = title if i == 0 else f"{title} (續)"
-        payload = {
-            "username": "Fiona 行程管家",
-            "avatar_url": "https://cdn-icons-png.flaticon.com/512/2693/2693507.png",
-            "embeds": [{
-                "title": str(display_title),
-                "color": int(color),
-                "fields": chunk,
-                "footer": {"text": f"系統分支: {os.getenv('GITHUB_REF_NAME', 'main')}"},
-                "timestamp": now_iso
-            }]
-        }
-
-        try:
-            res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
-            if res.status_code != 204:
-                log(f"❌ Discord 發送失敗 ({res.status_code}): {res.text}")
-            else:
-                log(f"✅ Discord 發送成功: {res.status_code}")
-        except Exception as e:
-            log(f"Discord 連線異常: {e}")
-
-# ==========================================
-# 日曆核心邏輯
-# ==========================================
 def get_calendar():
     token_info = json.loads(GOOGLE_TOKEN_JSON)
     creds = Credentials.from_authorized_user_info(token_info, SCOPES)
     return build('calendar', 'v3', credentials=creds)
-
-def parse_with_gemini(text):
-    try:
-        from google import genai
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        now = datetime.datetime.now(TZ)
-        prompt = f"現在是 {now.strftime('%Y-%m-%d %H:%M %A')}。將訊息解析為 JSON: {{\"summary\": \"標題\", \"start\": \"YYYY-MM-DDTHH:MM\", \"end\": \"YYYY-MM-DDTHH:MM\"}}。訊息：{text}"
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        raw = response.text.strip().strip("`").lstrip("json").strip()
-        return json.loads(raw)
-    except Exception:
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        now = datetime.datetime.now(TZ)
-        prompt = f"現在是 {now.strftime('%Y-%m-%d %H:%M %A')}。將訊息解析為 JSON: {{\"summary\": \"標題\", \"start\": \"YYYY-MM-DDTHH:MM\", \"end\": \"YYYY-MM-DDTHH:MM\"}}。訊息：{text}"
-        resp = model.generate_content(prompt)
-        raw = resp.text.strip().strip("`").lstrip("json").strip()
-        return json.loads(raw)
 
 def try_parse_strict(text):
     now = datetime.datetime.now(TZ)
@@ -116,77 +87,101 @@ def try_parse_strict(text):
         return {"summary": g["title"], "start": start.strftime("%Y-%m-%dT%H:%M"), "end": end.strftime("%Y-%m-%dT%H:%M")}
     return None
 
+def parse_with_gemini(text):
+    import google.generativeai as genai
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    now = datetime.datetime.now(TZ)
+    prompt = f"現在是 {now.strftime('%Y-%m-%d %H:%M %A')}。將訊息解析為 JSON: {{\"summary\": \"標題\", \"start\": \"YYYY-MM-DDTHH:MM\", \"end\": \"YYYY-MM-DDTHH:MM\"}}。訊息：{text}"
+    resp = model.generate_content(prompt)
+    raw = resp.text.strip().strip("`").lstrip("json").strip()
+    return json.loads(raw)
+
 def do_create():
     data = try_parse_strict(TEXT)
-    mode = "⚡️ 高速"
+    mode = "⚡️"
     if data is None:
         try:
             data = parse_with_gemini(TEXT)
-            mode = "🤖 AI"
+            mode = "🤖"
         except Exception as e:
-            send_discord(f"❌ 解析失敗: {e}", color=15158332); return
+            notify(f"❌ 解析失敗: {e}"); return
+
     target_cal = 'primary'
+    cal_label = "👤 個人"
     family_keywords = ["老婆", "家", "我們", "家庭", "小孩", "晚餐", "產檢", "接送"]
-    is_family = FAMILY_CAL_ID and any(k in TEXT for k in family_keywords)
-    target_cal = FAMILY_CAL_ID if is_family else 'primary'
-    try:
-        start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
-        end = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
-        event = {'summary': data["summary"], 'start': {'dateTime': start.isoformat()}, 'end': {'dateTime': end.isoformat()}}
-        created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
-        fields = [
-            {"name": "📌 內容", "value": f"**{data['summary']}**", "inline": False},
-            {"name": "⏰ 時間", "value": f"{start.strftime('%m/%d %H:%M')} - {end.strftime('%H:%M')}", "inline": True},
-            {"name": "📂 位置", "value": f"{'🏠 家庭' if is_family else '👤 個人'} ({mode})", "inline": True},
-            {"name": "🔗 連結", "value": f"[日曆連結](<{created.get('htmlLink')}>)", "inline": False}
-        ]
-        send_discord("✅ 行程存入成功", embed_fields=fields)
-    except Exception as e:
-        send_discord(f"❌ 存入失敗: {e}", color=15158332)
+    if FAMILY_CAL_ID and any(k in TEXT for k in family_keywords):
+        target_cal = FAMILY_CAL_ID
+        cal_label = "🏠 家庭"
+
+    start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
+    end   = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
+    event = {
+        'summary': data["summary"],
+        'start': {'dateTime': start.isoformat(), 'timeZone': 'Asia/Taipei'},
+        'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
+    }
+    created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
+    notify(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 [查看行程]({created.get('htmlLink')})")
 
 def do_list():
     now = datetime.datetime.now(TZ)
     arg = TEXT.strip().lower()
-    days = 1 if arg == "today" else (int(arg) if arg.isdigit() else 7)
-    sd = now.replace(hour=0, minute=0, second=0) if days == 1 else now
-    ed = sd + datetime.timedelta(days=days)
+    if arg == "today":
+        sd = now.replace(hour=0, minute=0, second=0); ed = sd + datetime.timedelta(days=1); label = "今天"
+    else:
+        try: days = int(arg) if arg else 7
+        except: days = 7
+        sd = now; ed = now + datetime.timedelta(days=days); label = f"未來 {days} 天"
+
     try:
         service = get_calendar()
         cals = [('primary', '👤', 'p')]
         if FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠', 'f'))
-        fields = []
+        
+        keyboard = []
+
         for cid, icon, short_code in cals:
-            items = service.events().list(calendarId=cid, timeMin=sd.isoformat(), timeMax=ed.isoformat(), singleEvents=True, orderBy='startTime').execute().get('items', [])
-            for ev in items:
+            events = service.events().list(calendarId=cid, timeMin=sd.isoformat(), timeMax=ed.isoformat(),
+                                          singleEvents=True, orderBy='startTime').execute().get('items', [])
+            
+            for ev in events:
                 t = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
-                del_url = f"{CF_WORKER_URL}/del?sc={short_code}&eid={ev['id']}"
-                fields.append({
-                    "name": f"{icon} {dt.strftime('%m/%d %H:%M')}",
-                    "value": f"{ev.get('summary','(無標題)')} **[[❌]](<{del_url}>)**",
-                    "inline": True
-                })
-        if not fields:
-            send_discord(f"📭 未來 {days} 天沒有行程")
+                summary = ev.get('summary', '(無標題)')
+                keyboard.append([{"text": f"{icon} {dt.strftime('%m/%d %H:%M')} {summary} ❌", "callback_data": f"del:{short_code}|{ev['id']}"}])
+
+        if not keyboard:
+            notify(f"📭 {label}沒有行程")
         else:
-            send_discord(f"📋 未來 {days} 天行程預覽", embed_fields=fields)
+            notify(f"📋 {label}行程預覽\n\n" + "\n".join([btn[0]["text"].replace(" ❌","") for btn in keyboard]))
+        if SOURCE != "line":
+            send_telegram(f"📋 {label}行程預覽", reply_markup={"inline_keyboard": keyboard})
+            
     except Exception as e:
-        send_discord(f"❌ 列表失敗: {e}", color=15158332)
+        notify(f"❌ 無法讀取行程: {str(e)}")
 
 def do_del():
     try:
-        sc, eid = EVENT_ID.split("|", 1) if "|" in EVENT_ID else ('p', EVENT_ID)
-        cid = FAMILY_CAL_ID if sc == 'f' else 'primary'
+        raw_data = EVENT_ID
+        if "|" in raw_data:
+            short_code, eid = raw_data.split("|", 1)
+            cid = 'primary' if short_code == 'p' else FAMILY_CAL_ID
+        else:
+            cid, eid = 'primary', raw_data
+            
         get_calendar().events().delete(calendarId=cid, eventId=eid).execute()
-        send_discord("🗑 行程刪除成功", color=15158332)
+        notify("🗑 行程已成功刪除")
     except Exception as e:
-        send_discord(f"❌ 刪除失敗: {e}", color=15158332)
+        notify(f"❌ 刪除失敗: {e}")
 
 def main():
-    if not DISCORD_WEBHOOK_URL: return
-    if ACTION == "list": do_list()
-    elif ACTION == "del": do_del()
-    else: do_create()
+    if not CHAT_ID: return
+    try:
+        if ACTION == "list": do_list()
+        elif ACTION == "del": do_del()
+        else: do_create()
+    except Exception as e: log(f"Error: {e}")
 
 if __name__ == '__main__':
     main()
