@@ -118,7 +118,6 @@ def do_list():
         cals = [('primary', '👤', 'p')]
         if FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠', 'f'))
         
-        lines = [f"📋 {label}行程預覽\n"]
         keyboard = []
 
         for cid, icon, short_code in cals:
@@ -129,13 +128,12 @@ def do_list():
                 t = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
-                lines.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {summary}")
                 keyboard.append([{"text": f"{icon} {dt.strftime('%m/%d %H:%M')} {summary} ❌", "callback_data": f"del:{short_code}|{ev['id']}"}])
 
-        if len(lines) <= 1:
+        if not keyboard:
             send_telegram(f"📭 {label}沒有行程")
         else:
-            send_telegram("\n".join(lines), reply_markup={"inline_keyboard": keyboard})
+            send_telegram(f"📋 {label}行程預覽", reply_markup={"inline_keyboard": keyboard})
             
     except Exception as e:
         send_telegram(f"❌ 無法讀取行程: {str(e)}")
