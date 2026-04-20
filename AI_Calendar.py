@@ -12,19 +12,17 @@ from googleapiclient.discovery import build
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
-# 你的 Cloudflare Worker 網址 (用來處理點擊刪除)
 CF_WORKER_URL     = os.environ.get("CF_WORKER_URL", "https://your-worker.your-name.workers.dev")
 
 ACTION            = os.environ.get("ACTION", "create")
 TEXT              = os.environ.get("TEXT", "")
 EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
-SOURCE            = "discord"  # 強制鎖定 Discord
+SOURCE            = "discord"
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-# 格式解析正則
 RE_STRICT = re.compile(r'^\s*(?:(?P<year>\d{4})/)?(?P<month>\d{1,2})/(?P<day>\d{1,2})\s+(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$')
 RE_RELATIVE = re.compile(r'^\s*(?P<rel>今天|明天|後天)\s+(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$')
 
@@ -32,30 +30,39 @@ def log(msg):
     print(f"[AI_Calendar] {msg}", flush=True)
 
 # ==========================================
-# Discord 推播核心 (Embed 卡片版)
+# Discord 推播核心 (支援自動分批防爆 400)
 # ==========================================
 def send_discord(title, embed_fields=None, color=3066993):
     if not DISCORD_WEBHOOK_URL:
         log("❌ 找不到 DISCORD_WEBHOOK_URL")
         return
     
-    payload = {
-        "username": "Fiona 行程管家",
-        "avatar_url": "https://cdn-icons-png.flaticon.com/512/2693/2693507.png",
-        "embeds": [{
-            "title": title,
-            "color": color,
-            "fields": embed_fields or [],
-            "footer": {"text": f"系統分支: {os.getenv('GITHUB_REF_NAME', 'main')} • 自動化同步"},
-            "timestamp": datetime.datetime.now(TZ).isoformat()
-        }]
-    }
+    # Discord 限制每個 Embed 最多 25 個 fields
+    fields = embed_fields or []
+    chunk_size = 20 # 保險起見設定 20
+    chunks = [fields[i:i + chunk_size] for i in range(0, len(fields), chunk_size)] if fields else [[]]
 
-    try:
-        res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
-        log(f"Discord 發送結果: {res.status_code}")
-    except Exception as e:
-        log(f"Discord 連線異常: {e}")
+    for i, chunk in enumerate(chunks):
+        display_title = title if i == 0 else f"{title} (續)"
+        payload = {
+            "username": "Fiona 行程管家",
+            "avatar_url": "https://cdn-icons-png.flaticon.com/512/2693/2693507.png",
+            "embeds": [{
+                "title": display_title,
+                "color": color,
+                "fields": chunk,
+                "footer": {"text": f"系統分支: {os.getenv('GITHUB_REF_NAME', 'main')}"},
+                "timestamp": datetime.datetime.now(TZ).isoformat()
+            }]
+        }
+
+        try:
+            res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+            log(f"Discord 發送結果: {res.status_code}")
+            if res.status_code != 204:
+                log(f"❌ Discord 報錯: {res.text}")
+        except Exception as e:
+            log(f"Discord 連線異常: {e}")
 
 # ==========================================
 # 日曆核心邏輯
@@ -112,16 +119,14 @@ def do_create():
         target_cal = FAMILY_CAL_ID
         cal_label = "🏠 家庭日曆"
 
-    start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
-    end   = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
-    
-    event = {
-        'summary': data["summary"],
-        'start': {'dateTime': start.isoformat(), 'timeZone': 'Asia/Taipei'},
-        'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
-    }
-    
     try:
+        start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
+        end   = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
+        event = {
+            'summary': data["summary"],
+            'start': {'dateTime': start.isoformat(), 'timeZone': 'Asia/Taipei'},
+            'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
+        }
         created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
         fields = [
             {"name": "📌 內容", "value": f"**{data['summary']}**", "inline": False},
@@ -153,8 +158,6 @@ def do_list():
                 t = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
-                
-                # 產生 Cloudflare Worker 刪除連結
                 del_url = f"{CF_WORKER_URL}/del?sc={short_code}&eid={ev['id']}"
                 
                 fields.append({
@@ -178,7 +181,6 @@ def do_del():
             cid = FAMILY_CAL_ID if short_code == 'f' else 'primary'
         else:
             cid, eid = 'primary', raw_data
-            
         get_calendar().events().delete(calendarId=cid, eventId=eid).execute()
         send_discord("🗑 行程刪除成功", color=15158332)
     except Exception as e:
