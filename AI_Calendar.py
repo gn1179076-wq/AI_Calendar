@@ -19,7 +19,7 @@ TEXT              = os.environ.get("TEXT", "")
 EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
 LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-SOURCE = os.environ.get("SOURCE", "discord")
+SOURCE = "discord"  # 誰來都沒用，我只送 Discord
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
