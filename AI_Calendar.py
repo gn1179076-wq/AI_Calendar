@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 
 # ── 環境變數 ──
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-# TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
 CHAT_ID           = os.environ.get("CHAT_ID")
@@ -19,7 +19,7 @@ TEXT              = os.environ.get("TEXT", "")
 EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
 LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-SOURCE = "discord"  # 誰來都沒用，我只送 Discord
+SOURCE = "discord"
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
@@ -233,4 +233,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-根據這個改給我
+souce一直被切成line
