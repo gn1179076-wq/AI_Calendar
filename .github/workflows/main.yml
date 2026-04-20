@@ -47,5 +47,5 @@ jobs:
           TEXT:    ${{ github.event.inputs.text || '1' }}
           CHAT_ID: ${{ github.event.inputs.chat_id || secrets.CHAT_ID }}
           EVENT_ID: ${{ github.event.inputs.event_id }}
-          SOURCE:  ${{ github.event.inputs.source || 'telegram' }}
+          SOURCE:  ${{ github.event.inputs.source || 'discord' }}
         run: python AI_Calendar.py
