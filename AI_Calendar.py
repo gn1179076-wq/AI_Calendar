@@ -16,6 +16,8 @@ ACTION            = os.environ.get("ACTION", "create")
 TEXT              = os.environ.get("TEXT", "")
 EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
+LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+SOURCE            = os.environ.get("SOURCE", "telegram")
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
@@ -40,6 +42,21 @@ def send_telegram(text, reply_markup=None):
     payload = {"chat_id": CHAT_ID, "text": text}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     requests.post(url, json=payload, timeout=15)
+
+def send_line(text):
+    if not CHAT_ID or not LINE_TOKEN: return
+    url = "https://api.line.me/v2/bot/message/push"
+    payload = {"to": CHAT_ID, "messages": [{"type": "text", "text": text}]}
+    requests.post(url, json=payload, headers={
+        "Authorization": f"Bearer {LINE_TOKEN}",
+        "Content-Type": "application/json"
+    }, timeout=15)
+
+def notify(text):
+    if SOURCE == "line":
+        send_line(text)
+    else:
+        send_telegram(text)
 
 def get_calendar():
     token_info = json.loads(GOOGLE_TOKEN_JSON)
@@ -84,7 +101,7 @@ def do_create():
             data = parse_with_gemini(TEXT)
             mode = "🤖"
         except Exception as e:
-            send_telegram(f"❌ 解析失敗: {e}"); return
+            notify(f"❌ 解析失敗: {e}"); return
 
     target_cal = 'primary'
     cal_label = "👤 個人"
@@ -101,7 +118,7 @@ def do_create():
         'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
     }
     created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
-    send_telegram(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 [查看行程]({created.get('htmlLink')})")
+    notify(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 [查看行程]({created.get('htmlLink')})")
 
 def do_list():
     now = datetime.datetime.now(TZ)
@@ -131,12 +148,14 @@ def do_list():
                 keyboard.append([{"text": f"{icon} {dt.strftime('%m/%d %H:%M')} {summary} ❌", "callback_data": f"del:{short_code}|{ev['id']}"}])
 
         if not keyboard:
-            send_telegram(f"📭 {label}沒有行程")
+            notify(f"📭 {label}沒有行程")
         else:
+            notify(f"📋 {label}行程預覽\n\n" + "\n".join([btn[0]["text"].replace(" ❌","") for btn in keyboard]))
+        if SOURCE != "line":
             send_telegram(f"📋 {label}行程預覽", reply_markup={"inline_keyboard": keyboard})
             
     except Exception as e:
-        send_telegram(f"❌ 無法讀取行程: {str(e)}")
+        notify(f"❌ 無法讀取行程: {str(e)}")
 
 def do_del():
     try:
@@ -148,9 +167,9 @@ def do_del():
             cid, eid = 'primary', raw_data
             
         get_calendar().events().delete(calendarId=cid, eventId=eid).execute()
-        send_telegram("🗑 行程已成功刪除")
+        notify("🗑 行程已成功刪除")
     except Exception as e:
-        send_telegram(f"❌ 刪除失敗: {e}")
+        notify(f"❌ 刪除失敗: {e}")
 
 def main():
     if not CHAT_ID: return
