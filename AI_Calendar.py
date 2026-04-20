@@ -18,7 +18,7 @@ EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
 LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 DISCORD_WEBHOOK   = os.environ.get("DISCORD_WEBHOOK_URL")   # ← Discord Webhook URL
-SOURCE            = os.environ.get("SOURCE", "discord")
+SOURCE            = "discord"
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
