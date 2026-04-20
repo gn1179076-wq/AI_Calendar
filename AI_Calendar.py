@@ -104,7 +104,7 @@ def parse_with_gemini(text):
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel("gemini-2.0-flash")
     now = datetime.datetime.now(TZ)
-    prompt = f"現在是 {now.strftime('%Y-%m-%d %H:%M %A')}。將訊息解析為 JSON: {\"summary\": \"標題\", \"start\": \"YYYY-MM-DDTHH:MM\", \"end\": \"YYYY-MM-DDTHH:MM\"}。訊息：{text}"
+    prompt = f'現在是 {now.strftime("%Y-%m-%d %H:%M %A")}。將訊息解析為 JSON: {{"summary": "標題", "start": "YYYY-MM-DDTHH:MM", "end": "YYYY-MM-DDTHH:MM"}}。訊息：{text}'
     resp = model.generate_content(prompt)
     raw = resp.text.strip().strip("`").lstrip("json").strip()
     return json.loads(raw)
