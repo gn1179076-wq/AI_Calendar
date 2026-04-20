@@ -130,10 +130,7 @@ def do_list():
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
                 lines.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {summary}")
-                keyboard.append([
-                    {"text": f"{icon} {dt.strftime('%m/%d')} {summary[:12]}", "callback_data": "noop"},
-                    {"text": "❌", "callback_data": f"del:{short_code}|{ev['id']}"}
-                ])
+                keyboard.append([{"text": f"{icon} {dt.strftime('%m/%d %H:%M')} {summary} ❌", "callback_data": f"del:{short_code}|{ev['id']}"}])
 
         if len(lines) <= 1:
             send_telegram(f"📭 {label}沒有行程")
