@@ -168,10 +168,11 @@ def do_list():
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
                 lines.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {summary}")
+        today_str = now.strftime("%m/%d (%a)").replace("Mon","一").replace("Tue","二").replace("Wed","三").replace("Thu","四").replace("Fri","五").replace("Sat","六").replace("Sun","日")
         if not lines:
-            notify(f"📭 {label}沒有行程")
+            notify(f"📆 今天是 {today_str}\n\n📭 {label}沒有行程")
         else:
-            notify(f"📋 {label}行程預覽\n\n" + "\n".join(lines))
+            notify(f"📆 今天是 {today_str}\n📋 {label}行程預覽\n\n" + "\n".join(lines))
         # ── Telegram inline keyboard 已停用（Discord 不支援）──
         # if SOURCE != "line":
         #     send_telegram(f"📋 {label}行程預覽", reply_markup={"inline_keyboard": keyboard})
