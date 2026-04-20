@@ -44,13 +44,17 @@ def send_telegram(text, reply_markup=None):
     requests.post(url, json=payload, timeout=15)
 
 def send_line(text):
-    if not CHAT_ID or not LINE_TOKEN: return
+    if not CHAT_ID or not LINE_TOKEN:
+        log(f"send_line skipped: CHAT_ID={bool(CHAT_ID)}, LINE_TOKEN={bool(LINE_TOKEN)}")
+        return
     url = "https://api.line.me/v2/bot/message/push"
-    payload = {"to": CHAT_ID, "messages": [{"type": "text", "text": text}]}
-    requests.post(url, json=payload, headers={
+    body = {"to": CHAT_ID, "messages": [{"type": "text", "text": text}]}
+    log(f"send_line to={CHAT_ID}")
+    r = requests.post(url, json=body, headers={
         "Authorization": f"Bearer {LINE_TOKEN}",
         "Content-Type": "application/json"
     }, timeout=15)
+    log(f"send_line status={r.status_code} body={r.text[:200]}")
 
 def notify(text):
     if SOURCE == "line":
