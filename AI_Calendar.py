@@ -137,6 +137,7 @@ def do_create():
     notify(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d')} ({WD[start.weekday()]}) {start.strftime('%H:%M')}\n🔗 查看行程：{created.get('htmlLink')}")
 
 def do_list():
+    log(f"FAMILY_CAL_ID set={bool(FAMILY_CAL_ID)}, value_len={len(FAMILY_CAL_ID) if FAMILY_CAL_ID else 0}")
     now = datetime.datetime.now(TZ)
     arg = TEXT.strip().lower()
     if arg == "today":
