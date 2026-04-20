@@ -17,21 +17,34 @@ TEXT              = os.environ.get("TEXT", "")
 EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
 LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-DISCORD_WEBHOOK   = os.environ.get("DISCORD_WEBHOOK_URL")   # ← 新增 Discord Webhook URL
-SOURCE            =  "discord"  # 預設改為 discord
+DISCORD_WEBHOOK   = os.environ.get("DISCORD_WEBHOOK_URL")   # ← Discord Webhook URL
+SOURCE            = os.environ.get("SOURCE", "discord")
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-# 格式 1：M/D HH:MM
+# ── 支援格式說明 ──
+FORMAT_HELP = """❓ 格式不符，請用以下格式輸入：
+
+📌 固定日期：
+  4/25 14:00 看牙醫
+  4/25 14:00-15:30 會議
+  2026/4/25 14:00 健檢
+
+📌 相對日期：
+  今天 20:00 家庭晚餐
+  明天 09:00-10:00 產檢
+  後天 18:30 接送"""
+
+# 格式 1：(YYYY/)M/D HH:MM(-HH:MM) 標題
 RE_STRICT = re.compile(
-    r'^s*(?:(?P<year>d{4})/)?(?P<month>d{1,2})/(?P<day>d{1,2})s+'
-    r'(?P<sh>d{1,2}):(?P<sm>d{2})(?:s*-s*(?P<eh>d{1,2}):(?P<em>d{2}))?s+(?P<title>.+?)s*$'
+    r'^\s*(?:(?P<year>\d{4})/)?(?P<month>\d{1,2})/(?P<day>\d{1,2})\s+'
+    r'(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$'
 )
-# 格式 2：今天/明天/後天 HH:MM
+# 格式 2：今天/明天/後天 HH:MM(-HH:MM) 標題
 RE_RELATIVE = re.compile(
-    r'^s*(?P<rel>今天|明天|後天)s+'
-    r'(?P<sh>d{1,2}):(?P<sm>d{2})(?:s*-s*(?P<eh>d{1,2}):(?P<em>d{2}))?s+(?P<title>.+?)s*$'
+    r'^\s*(?P<rel>今天|明天|後天)\s+'
+    r'(?P<sh>\d{1,2}):(?P<sm>\d{2})(?:\s*-\s*(?P<eh>\d{1,2}):(?P<em>\d{2}))?\s+(?P<title>.+?)\s*$'
 )
 
 def log(msg):
@@ -99,25 +112,24 @@ def try_parse_strict(text):
         return {"summary": g["title"], "start": start.strftime("%Y-%m-%dT%H:%M"), "end": end.strftime("%Y-%m-%dT%H:%M")}
     return None
 
-def parse_with_gemini(text):
-    import google.generativeai as genai
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    now = datetime.datetime.now(TZ)
-    prompt = f'現在是 {now.strftime("%Y-%m-%d %H:%M %A")}。將訊息解析為 JSON: {{"summary": "標題", "start": "YYYY-MM-DDTHH:MM", "end": "YYYY-MM-DDTHH:MM"}}。訊息：{text}'
-    resp = model.generate_content(prompt)
-    raw = resp.text.strip().strip("`").lstrip("json").strip()
-    return json.loads(raw)
+# ── Gemini 解析（已停用，固定格式不需 AI） ──
+# def parse_with_gemini(text):
+#     import google.generativeai as genai
+#     genai.configure(api_key=GEMINI_API_KEY)
+#     model = genai.GenerativeModel("gemini-2.0-flash")
+#     now = datetime.datetime.now(TZ)
+#     prompt = f'現在是 {now.strftime("%Y-%m-%d %H:%M %A")}。將訊息解析為 JSON: {{"summary": "標題", "start": "YYYY-MM-DDTHH:MM", "end": "YYYY-MM-DDTHH:MM"}}。訊息：{text}'
+#     resp = model.generate_content(prompt)
+#     raw = resp.text.strip().strip("`").lstrip("json").strip()
+#     return json.loads(raw)
 
 def do_create():
     data = try_parse_strict(TEXT)
-    mode = "⚡️"
     if data is None:
-        try:
-            data = parse_with_gemini(TEXT)
-            mode = "🤖"
-        except Exception as e:
-            notify(f"❌ 解析失敗: {e}"); return
+        # 格式不符，直接提示使用者，不呼叫 AI
+        notify(FORMAT_HELP)
+        return
+    mode = "⚡️"
     target_cal = 'primary'
     cal_label = "👤 個人"
     family_keywords = ["老婆", "家", "我們", "家庭", "小孩", "晚餐", "產檢", "接送"]
