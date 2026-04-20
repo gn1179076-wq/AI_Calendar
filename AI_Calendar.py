@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import json
 import re
@@ -8,6 +9,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 # ── 環境變數 ──
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_TOKEN_JSON = os.environ.get("GOOGLE_TOKEN_JSON")
 GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY")
@@ -17,7 +19,7 @@ TEXT              = os.environ.get("TEXT", "")
 EVENT_ID          = os.environ.get("EVENT_ID", "")
 FAMILY_CAL_ID     = os.environ.get("FAMILY_CAL_ID")
 LINE_TOKEN        = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-SOURCE            = os.environ.get("SOURCE", "telegram")
+SOURCE  =  "discord"
 
 TZ = ZoneInfo("Asia/Taipei")
 SCOPES = ['https://www.googleapis.com/auth/calendar']
@@ -36,6 +38,36 @@ RE_RELATIVE = re.compile(
 def log(msg):
     print(f"[AI_Calendar] {msg}", flush=True)
 
+# ==========================================
+# 推播函式庫 (Discord / Telegram / LINE)
+# ==========================================
+def send_discord(title, embed_fields=None, color=3066993):
+    if not DISCORD_WEBHOOK_URL:
+        log("❌ 找不到 DISCORD_WEBHOOK_URL")
+        return
+    
+    payload = {
+        "username": "AI 行程管家",
+        "avatar_url": "https://cdn-icons-png.flaticon.com/512/2693/2693507.png",
+        "embeds": [{
+            "title": title,
+            "color": color,
+            "fields": embed_fields or [],
+            "footer": {"text": f"來源分支: {os.getenv('GITHUB_REF_NAME', 'main')}"},
+            "timestamp": datetime.datetime.now(TZ).isoformat()
+        }]
+    }
+    
+    # 如果是刪除操作，把顏色換成紅色
+    if color == 3066993 and ("刪除" in title or "❌" in title):
+        payload["embeds"][0]["color"] = 15158332
+
+    try:
+        res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+        log(f"Discord 狀態: {res.status_code}")
+    except Exception as e:
+        log(f"Discord 連線異常: {e}")
+
 def send_telegram(text, reply_markup=None):
     if not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -44,24 +76,26 @@ def send_telegram(text, reply_markup=None):
     requests.post(url, json=payload, timeout=15)
 
 def send_line(text):
-    if not CHAT_ID or not LINE_TOKEN:
-        log(f"send_line skipped: CHAT_ID={bool(CHAT_ID)}, LINE_TOKEN={bool(LINE_TOKEN)}")
-        return
+    if not CHAT_ID or not LINE_TOKEN: return
     url = "https://api.line.me/v2/bot/message/push"
     body = {"to": CHAT_ID, "messages": [{"type": "text", "text": text}]}
-    log(f"send_line to={CHAT_ID}")
-    r = requests.post(url, json=body, headers={
+    requests.post(url, json=body, headers={
         "Authorization": f"Bearer {LINE_TOKEN}",
         "Content-Type": "application/json"
     }, timeout=15)
-    log(f"send_line status={r.status_code} body={r.text[:200]}")
 
-def notify(text):
-    if SOURCE == "line":
-        send_line(text)
+def notify(msg_title, embed_fields=None, raw_text=None):
+    # Discord 優先顯示卡片，其餘平台顯示純文字
+    if SOURCE == "discord":
+        send_discord(msg_title, embed_fields)
+    elif SOURCE == "line":
+        send_line(raw_text or msg_title)
     else:
-        send_telegram(text)
+        send_telegram(raw_text or msg_title)
 
+# ==========================================
+# 日曆邏輯
+# ==========================================
 def get_calendar():
     token_info = json.loads(GOOGLE_TOKEN_JSON)
     creds = Credentials.from_authorized_user_info(token_info, SCOPES)
@@ -99,30 +133,44 @@ def parse_with_gemini(text):
 
 def do_create():
     data = try_parse_strict(TEXT)
-    mode = "⚡️"
+    mode = "⚡️ 高速"
     if data is None:
         try:
             data = parse_with_gemini(TEXT)
-            mode = "🤖"
+            mode = "🤖 AI"
         except Exception as e:
             notify(f"❌ 解析失敗: {e}"); return
 
     target_cal = 'primary'
-    cal_label = "👤 個人"
+    cal_label = "👤 個人日曆"
     family_keywords = ["老婆", "家", "我們", "家庭", "小孩", "晚餐", "產檢", "接送"]
     if FAMILY_CAL_ID and any(k in TEXT for k in family_keywords):
         target_cal = FAMILY_CAL_ID
-        cal_label = "🏠 家庭"
+        cal_label = "🏠 家庭日曆"
 
     start = datetime.datetime.fromisoformat(data["start"]).replace(tzinfo=TZ)
     end   = datetime.datetime.fromisoformat(data["end"]).replace(tzinfo=TZ)
+    
     event = {
         'summary': data["summary"],
         'start': {'dateTime': start.isoformat(), 'timeZone': 'Asia/Taipei'},
         'end':   {'dateTime': end.isoformat(),   'timeZone': 'Asia/Taipei'},
     }
-    created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
-    notify(f"✅ 已存入 {cal_label} ({mode})\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}\n🔗 [查看行程]({created.get('htmlLink')})")
+    
+    try:
+        created = get_calendar().events().insert(calendarId=target_cal, body=event).execute()
+        
+        fields = [
+            {"name": "📌 行程內容", "value": f"**{data['summary']}**", "inline": False},
+            {"name": "⏰ 開始時間", "value": start.strftime('%m/%d (%a) %H:%M'), "inline": True},
+            {"name": "⏳ 結束時間", "value": end.strftime('%m/%d (%a) %H:%M'), "inline": True},
+            {"name": "📂 存入位置", "value": f"{cal_label} ({mode}解析)", "inline": False},
+            {"name": "🔗 連結", "value": f"[在 Google 日曆中查看](<{created.get('htmlLink')}>)", "inline": False}
+        ]
+        
+        notify(f"✅ 行程已存入日曆", embed_fields=fields, raw_text=f"✅ 已存入 {cal_label}\n📅 {data['summary']}\n⏰ {start.strftime('%m/%d %H:%M')}")
+    except Exception as e:
+        notify(f"❌ 存入失敗: {e}")
 
 def do_list():
     now = datetime.datetime.now(TZ)
@@ -139,24 +187,24 @@ def do_list():
         cals = [('primary', '👤', 'p')]
         if FAMILY_CAL_ID: cals.append((FAMILY_CAL_ID, '🏠', 'f'))
         
-        keyboard = []
+        event_list_text = []
+        fields = []
 
         for cid, icon, short_code in cals:
             events = service.events().list(calendarId=cid, timeMin=sd.isoformat(), timeMax=ed.isoformat(),
-                                          singleEvents=True, orderBy='startTime').execute().get('items', [])
+                                           singleEvents=True, orderBy='startTime').execute().get('items', [])
             
             for ev in events:
                 t = ev['start'].get('dateTime') or ev['start'].get('date')
                 dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(TZ)
                 summary = ev.get('summary', '(無標題)')
-                keyboard.append([{"text": f"{icon} {dt.strftime('%m/%d %H:%M')} {summary} ❌", "callback_data": f"del:{short_code}|{ev['id']}"}])
+                event_list_text.append(f"{icon} {dt.strftime('%m/%d %H:%M')} {summary}")
+                fields.append({"name": f"{icon} {dt.strftime('%m/%d %H:%M')}", "value": summary, "inline": True})
 
-        if not keyboard:
+        if not event_list_text:
             notify(f"📭 {label}沒有行程")
         else:
-            notify(f"📋 {label}行程預覽\n\n" + "\n".join([btn[0]["text"].replace(" ❌","") for btn in keyboard]))
-        if SOURCE != "line":
-            send_telegram(f"📋 {label}行程預覽", reply_markup={"inline_keyboard": keyboard})
+            notify(f"📋 {label}行程預覽", embed_fields=fields, raw_text=f"📋 {label}行程預覽\n\n" + "\n".join(event_list_text))
             
     except Exception as e:
         notify(f"❌ 無法讀取行程: {str(e)}")
@@ -171,12 +219,12 @@ def do_del():
             cid, eid = 'primary', raw_data
             
         get_calendar().events().delete(calendarId=cid, eventId=eid).execute()
-        notify("🗑 行程已成功刪除")
+        notify("🗑 行程已成功刪除", color=15158332)
     except Exception as e:
         notify(f"❌ 刪除失敗: {e}")
 
 def main():
-    if not CHAT_ID: return
+    if not CHAT_ID and not DISCORD_WEBHOOK_URL: return
     try:
         if ACTION == "list": do_list()
         elif ACTION == "del": do_del()
