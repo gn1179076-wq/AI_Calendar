@@ -23,8 +23,8 @@ on:
         required: false
         default: 'discord'
   # ── 加入定時執行 ──
-  schedule:
-    - cron: '55 21 * * *' # 台灣時間 05:55 (UTC 21:55)
+  #schedule:
+  #  - cron: '55 21 * * *' # 台灣時間 05:55 (UTC 21:55)
 
 jobs:
   run:
